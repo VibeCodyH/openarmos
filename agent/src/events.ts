@@ -4,6 +4,7 @@
 
 import mqtt from "mqtt";
 import { config } from "./config.ts";
+import { createDeduper } from "./dedupe.ts";
 import type { DetectionEvent } from "./types.ts";
 
 // Frigate's `frigate/events` payload (only the fields we use).
@@ -30,7 +31,7 @@ const faceOf = (sub: SubLabel): string | null => {
 
 export function startEvents(onEvent: (ev: DetectionEvent) => void): mqtt.MqttClient {
   const client = mqtt.connect(config.mqttUrl, { reconnectPeriod: 5000 });
-  const seen = new Set<string>(); // event ids already alerted on
+  const deduper = createDeduper({ cooldownSeconds: config.eventCooldownSeconds });
 
   client.on("connect", () => {
     client.subscribe(config.frigateEventsTopic, (err) => {
@@ -49,12 +50,12 @@ export function startEvents(onEvent: (ev: DetectionEvent) => void): mqtt.MqttCli
       return;
     }
     const a = msg.after;
-    // Alert once per tracked object, on first detection only. Frigate emits a
-    // continuous stream of "update" messages as an object moves; acting on each
-    // turns a single person into a flood of alerts.
-    if (msg.type !== "new" || !a?.id || seen.has(a.id)) return;
-    seen.add(a.id);
-    if (seen.size > 1000) seen.clear(); // crude cap; ids are short-lived
+    // Surface once per tracked object on first detection, and collapse a visit
+    // that fragments into several tracked objects (see dedupe.ts). Frigate also
+    // emits a continuous stream of "update" messages as an object moves; acting on
+    // each would turn a single person into a flood of alerts.
+    if (msg.type !== "new" || !a?.id) return;
+    if (!deduper.accept(a.id, a.camera, a.label, Date.now())) return;
 
     const zones = a.current_zones ?? [];
 

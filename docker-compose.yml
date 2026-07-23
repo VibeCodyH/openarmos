@@ -116,6 +116,7 @@ services:
       NTFY_URL: ${NTFY_URL-}
       KNOWN_FACES: ${KNOWN_FACES-}
       MODE: ${MODE:-home}
+      EVENT_COOLDOWN_SECONDS: ${EVENT_COOLDOWN_SECONDS:-20}
       ARMED_ZONES: ${ARMED_ZONES-}
       HA_LOCKS: ${HA_LOCKS-}
       HA_GATE: ${HA_GATE-}

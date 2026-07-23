@@ -47,6 +47,9 @@ export const config = {
   batteryMode: bool(process.env.BATTERY_MODE),
   batteryCameras: listRaw(process.env.BATTERY_CAMERAS),
   batteryActiveSeconds: posNum(process.env.BATTERY_ACTIVE_SECONDS, 60),
+  // Collapse repeat detections of the same camera+object within this window into
+  // one alert — a single visit can fragment into several Frigate tracked objects.
+  eventCooldownSeconds: posNum(process.env.EVENT_COOLDOWN_SECONDS, 20),
 } as const;
 
 // Mutable runtime state — seeded from env, editable via the chat/API.
