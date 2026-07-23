@@ -10,6 +10,20 @@ const list = (v: string | undefined): string[] =>
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
 
+// Like `list` but preserves case — Frigate camera names are case-sensitive.
+const listRaw = (v: string | undefined): string[] =>
+  (v ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+const bool = (v: string | undefined): boolean => (v ?? "").toLowerCase() === "true";
+
+const posNum = (v: string | undefined, fallback: number): number => {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
 const isMode = (v: string | undefined): v is Mode =>
   v === "home" || v === "away" || v === "night";
 
@@ -28,6 +42,11 @@ export const config = {
   // this is the host-published (or Tailscale) address, not the compose hostname.
   frigatePublicUrl: process.env.FRIGATE_PUBLIC_URL ?? "https://localhost:8971",
   port: Number(process.env.PORT ?? 8099),
+  // Battery-camera mode: keep battery/solar cameras asleep and only wake them
+  // for an event, so a continuous stream doesn't flatten the battery.
+  batteryMode: bool(process.env.BATTERY_MODE),
+  batteryCameras: listRaw(process.env.BATTERY_CAMERAS),
+  batteryActiveSeconds: posNum(process.env.BATTERY_ACTIVE_SECONDS, 60),
 } as const;
 
 // Mutable runtime state — seeded from env, editable via the chat/API.

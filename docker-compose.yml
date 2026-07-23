@@ -121,6 +121,10 @@ services:
       HA_GATE: ${HA_GATE-}
       FRIGATE_PUBLIC_URL: ${FRIGATE_PUBLIC_URL:-https://localhost:8971}
       PORT: ${PORT:-8099}
+      # Battery-camera mode — see .env.example. Off by default.
+      BATTERY_MODE: ${BATTERY_MODE:-false}
+      BATTERY_CAMERAS: ${BATTERY_CAMERAS-}
+      BATTERY_ACTIVE_SECONDS: ${BATTERY_ACTIVE_SECONDS:-60}
     ports:
       - "8099:8099"
     networks:

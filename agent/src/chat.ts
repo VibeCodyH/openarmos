@@ -5,6 +5,7 @@ import http from "node:http";
 import { config, state } from "./config.ts";
 import { generate } from "./ollama.ts";
 import * as store from "./store.ts";
+import type { BatteryController } from "./battery.ts";
 
 const json = (res: http.ServerResponse, code: number, body: unknown): void => {
   res.writeHead(code, { "content-type": "application/json" });
@@ -49,7 +50,7 @@ async function answerChat(message: string): Promise<string> {
   }
 }
 
-export function startServer(): http.Server {
+export function startServer(battery: BatteryController | null = null): http.Server {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const path = url.pathname;
@@ -57,7 +58,23 @@ export function startServer(): http.Server {
     if (path === "/healthz") return json(res, 200, { ok: true });
 
     if (path === "/api/state") {
-      return json(res, 200, { ...state, frigatePublicUrl: config.frigatePublicUrl });
+      return json(res, 200, {
+        ...state,
+        frigatePublicUrl: config.frigatePublicUrl,
+        battery: battery ? { mode: true, cameras: battery.status() } : { mode: false },
+      });
+    }
+
+    // Wake a battery camera for an event window. This is the vendor-neutral hook:
+    // point any motion source at it (HA automation, ONVIF/PIR script, the "Wake"
+    // button, a plain curl). Body: {"camera":"front_door"} — omit to wake all.
+    if (path === "/trigger" && req.method === "POST") {
+      if (!battery) return json(res, 200, { batteryMode: false, note: "battery mode disabled; nothing to wake" });
+      const camera = parseJson(await readBody(req)).camera;
+      if (typeof camera === "string" && camera) battery.wake(camera);
+      else battery.wakeAll();
+      console.log(`[trigger] wake ${typeof camera === "string" && camera ? camera : "all"}`);
+      return json(res, 200, { cameras: battery.status(), activeSeconds: config.batteryActiveSeconds });
     }
 
     if (path === "/api/events") return json(res, 200, store.recent(50));
@@ -115,6 +132,10 @@ h1{font-size:17px;margin:0;letter-spacing:.3px}
 .chips button{margin-right:6px;text-transform:capitalize}
 .chips button.on{background:#1f6feb;border-color:#388bfd}
 .mute.muted{background:#5a1e1e;border-color:#b62324}
+.batt{font-size:12px;padding:5px 10px;border-radius:20px;background:#21262d;border:1px solid #30363d}
+.batt.on{background:#1a4d2e;border-color:#238636}
+.wake{background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:7px;padding:6px 12px;cursor:pointer;font:inherit;margin-left:6px}
+.wake:hover{border-color:#388bfd}
 main{max-width:860px;margin:0 auto;padding:20px}
 .toolbar{display:flex;align-items:center;gap:12px;margin:6px 0 12px}
 .toolbar h2{margin:0;font-size:15px;color:#adbac7}
@@ -138,6 +159,7 @@ main{max-width:860px;margin:0 auto;padding:20px}
 <h1>🗿 OpenArmos</h1>
 <span class="chips" id="modeChips"></span>
 <button class="mute" id="muteBtn">…</button>
+<span id="batteryBox"></span>
 <span class="spacer"></span>
 </header>
 <main>
@@ -159,7 +181,16 @@ function loadState(){return fetch("/api/state").then(function(r){return r.json()
   FRIG=s.frigatePublicUrl||"";
   document.getElementById("modeChips").innerHTML=MODES.map(function(m){return '<button data-mode="'+m+'" class="'+(s.mode===m?"on":"")+'">'+m+'</button>'}).join("");
   document.querySelectorAll("[data-mode]").forEach(function(b){b.onclick=function(){setMode(b.dataset.mode)}});
-  var mb=document.getElementById("muteBtn");mb.textContent=s.muted?"🔕 Muted":"🔔 Alerts on";mb.className="mute"+(s.muted?" muted":"")})}
+  var mb=document.getElementById("muteBtn");mb.textContent=s.muted?"🔕 Muted":"🔔 Alerts on";mb.className="mute"+(s.muted?" muted":"");
+  var bb=document.getElementById("batteryBox");
+  if(s.battery&&s.battery.mode){var cams=s.battery.cameras||[];
+    var awake=cams.filter(function(c){return c.state==="awake"}).map(function(c){return c.camera});
+    var waking=cams.some(function(c){return c.state==="waking"});
+    var label=awake.length?"👁 Awake · "+awake.map(esc).join(", "):waking?"⏳ Waking…":"💤 Asleep";
+    bb.innerHTML='<span class="batt'+(awake.length?" on":"")+'">'+label+'</span>'
+      +'<button class="wake" id="wakeBtn">Wake</button>';
+    document.getElementById("wakeBtn").onclick=function(){fetch("/trigger",{method:"POST",headers:{"content-type":"application/json"},body:"{}"}).then(loadState)};
+  }else bb.innerHTML=""})}
 function loadEvents(){return fetch("/api/events").then(function(r){return r.json()}).then(function(es){EVENTS=es;renderEvents()})}
 function renderEvents(){
   var min=+document.getElementById("filter").value;
@@ -186,5 +217,5 @@ document.getElementById("filter").onchange=renderEvents;
 document.getElementById("chatf").onsubmit=function(ev){ev.preventDefault();var m=document.getElementById("msg").value.trim();if(!m)return;
   document.getElementById("answer").textContent="…";
   fetch("/chat",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({message:m})}).then(function(r){return r.json()}).then(function(r){document.getElementById("answer").textContent=r.answer||r.error})};
-loadState();loadEvents();setInterval(loadEvents,5000);
+loadState();loadEvents();setInterval(function(){loadEvents();loadState()},5000);
 </script></body></html>`;

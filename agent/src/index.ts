@@ -7,8 +7,12 @@ import { assess } from "./score.ts";
 import { summarize, maybePush, templateSummary } from "./notify.ts";
 import { lockdown } from "./ha.ts";
 import { startServer } from "./chat.ts";
+import { createBatteryController, type BatteryController } from "./battery.ts";
 import * as store from "./store.ts";
 import type { DetectionEvent, EventRecord, ThreatAssessment } from "./types.ts";
+
+// Set once battery mode is wired below; null when the feature is off.
+let battery: BatteryController | null = null;
 
 function handle(ev: DetectionEvent): void {
   const assessment = assess(ev, state);
@@ -38,6 +42,55 @@ async function enrich(ev: DetectionEvent, assessment: ThreatAssessment, record: 
   }
 }
 
-console.log(`🗿 OpenArmos agent starting (mode=${state.mode}, model=${config.ollamaModel})`);
-startEvents(handle);
-startServer();
+console.log(
+  `🗿 OpenArmos agent starting (mode=${state.mode}, model=${config.ollamaModel}` +
+    `${config.batteryMode ? ", battery mode ON" : ""})`,
+);
+const client = startEvents(handle);
+
+if (config.batteryMode) {
+  battery = createBatteryController({
+    publish: (camera, on) => client.publish(`frigate/${camera}/enabled/set`, on ? "ON" : "OFF"),
+    cameras: config.batteryCameras,
+    activeSeconds: config.batteryActiveSeconds,
+  });
+  const stateTopics = config.batteryCameras.map((c) => `frigate/${c}/enabled/state`);
+
+  // Reconcile against Frigate's real state. enabled/state is retained, so on every
+  // (re)connect mosquitto replays each camera's actual state — this catches the
+  // boot race, Frigate restarts, and manual UI toggles, all without clobbering an
+  // open wake window (observeEnabled respects the timer).
+  const onConnect = (): void => {
+    battery!.sleepAll(); // fast path; the retained state below is the reliable one
+    client.subscribe(stateTopics, (err) => {
+      if (err) console.error("[battery] reconcile subscribe failed:", err);
+    });
+  };
+  if (client.connected) onConnect();
+  client.on("connect", onConnect); // also re-sleep + re-subscribe on reconnect
+
+  client.on("message", (topic, buf) => {
+    const m = topic.match(/^frigate\/(.+)\/enabled\/state$/);
+    if (m?.[1]) {
+      battery!.observeEnabled(m[1], buf.toString() === "ON");
+      return;
+    }
+    // Any activity for a managed camera keeps it awake (new AND update events, so
+    // a lingering visitor doesn't get cut off mid-window).
+    if (topic === config.frigateEventsTopic) {
+      try {
+        const cam = (JSON.parse(buf.toString()) as { after?: { camera?: string } })?.after?.camera;
+        if (cam) battery!.wake(cam);
+      } catch {
+        /* non-JSON payloads belong to the state branch above */
+      }
+    }
+  });
+
+  console.log(
+    `[battery] managing [${config.batteryCameras.join(", ") || "(none — set BATTERY_CAMERAS)"}]` +
+      `, wake window ${config.batteryActiveSeconds}s`,
+  );
+}
+
+startServer(battery);

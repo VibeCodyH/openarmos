@@ -83,8 +83,32 @@ Its responsibilities are:
 - serve a dashboard: an activity feed with snapshot thumbnails and one-click links to each Frigate clip, a home/away/night switch, a notification mute toggle, a threat-level filter, and a chat box for talking to the house
 - run home, away, and night behavior through `MODE`; away is the guardian posture
 - trigger configured Home Assistant locks and gate entities during lockdown
+- manage battery-camera power in battery mode (see below)
 
-The service listens on port 8099 and exposes the dashboard, `/chat`, and `/healthz`. Clip and snapshot links point at `FRIGATE_PUBLIC_URL` (the browser-reachable Frigate address); when Frigate authentication is on, be signed in to Frigate in the same browser for the links to load. Muting suppresses pushes but still records events to the feed. If `NTFY_URL` is blank, notifications are logged only.
+The service listens on port 8099 and exposes the dashboard, `/chat`, `/trigger`, and `/healthz`. Clip and snapshot links point at `FRIGATE_PUBLIC_URL` (the browser-reachable Frigate address); when Frigate authentication is on, be signed in to Frigate in the same browser for the links to load. Muting suppresses pushes but still records events to the feed. If `NTFY_URL` is blank, notifications are logged only.
+
+## Battery cameras (renters, no PoE)
+
+Frigate is built for always-on cameras: it holds a continuous stream to run detection. Point it at a **battery or solar camera** — a Tapo, Ring, or similar doorbell — and the nonstop pull flattens the battery in a day or two, because those cameras are designed to sleep and wake on their own PIR sensor.
+
+Battery mode fixes that. Set `BATTERY_MODE=true` and list the cameras in `BATTERY_CAMERAS`. Armos then:
+
+1. disables those cameras in Frigate on startup, which stops Frigate's `ffmpeg`; the on-demand restream releases the camera and it goes back to sleep,
+2. wakes a camera when it's triggered — for `BATTERY_ACTIVE_SECONDS`, extended by each live detection — then sleeps it again once the activity stops.
+
+The trigger is vendor-neutral, so any motion source can drive it:
+
+```bash
+# Wake all managed cameras (e.g. from an HA automation, an ONVIF/PIR script, or cron)
+curl -X POST http://localhost:8099/trigger
+
+# Wake one camera
+curl -X POST http://localhost:8099/trigger -H 'content-type: application/json' -d '{"camera":"front_door"}'
+```
+
+The dashboard also shows an asleep/awake badge and a **Wake** button. To wire a real doorbell's PIR locally (no cloud), use Home Assistant's Tapo integration to read the camera's motion sensor and `POST /trigger` from an automation.
+
+**Trade-off:** waking a sleeping camera takes ~5–15s, so event clips start a little late and can miss the first moments at the door. That is inherent to battery cameras, not a bug. For gap-free coverage on a critical entry, a wired/PoE camera in always-on mode is still the better choice.
 
 ## Hardware notes
 
