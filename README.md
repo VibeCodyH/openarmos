@@ -2,6 +2,8 @@
 
 Self-hosted, local-first smart-home AI security. Local YOLO detection, local face recognition, and a local-LLM agent that scores threats and talks to you. No cloud, no subscription, no footage on anyone else's server.
 
+> **Status — Alpha (v0.1.0).** The full pipeline works and is verified end to end, but so far only on a single hardware setup (one battery doorbell). Expect rough edges on other cameras and detectors. Issue reports — especially hardware-specific ones — are welcome.
+
 ## What it is
 
 OpenArmos composes Frigate, Mosquitto, Ollama, Home Assistant, and an original `armos` agent into one local security stack. Cameras feed Frigate. Frigate publishes structured events over MQTT. The agent evaluates those events with a local model, applies house context, and can notify you or act through Home Assistant.
