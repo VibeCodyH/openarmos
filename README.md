@@ -106,7 +106,11 @@ curl -X POST http://localhost:8099/trigger
 curl -X POST http://localhost:8099/trigger -H 'content-type: application/json' -d '{"camera":"front_door"}'
 ```
 
-The dashboard also shows an asleep/awake badge and a **Wake** button. To wire a real doorbell's PIR locally (no cloud), use Home Assistant's Tapo integration to read the camera's motion sensor and `POST /trigger` from an automation.
+The dashboard also shows an asleep/awake badge and a **Wake** button.
+
+**Where the trigger comes from.** If your camera exposes ONVIF (most wired/PoE cameras, and Tapo/Reolink models with a "camera account" enabled), point its motion event at `/trigger` — via Home Assistant's ONVIF or Tapo integration, an ONVIF pull-point/webhook listener, or the camera's own webhook. The cleanest source for a camera that can't self-report is a cheap standalone PIR/mmWave sensor (Zigbee/Wi-Fi) at the entry that `POST`s `/trigger` the instant it sees motion.
+
+**Battery doorbells often can't self-trigger.** Battery/solar Tapo doorbells (D210, D230, D235, …) deliberately do not expose ONVIF or RTSP, and their local API reports only motion *settings*, not live motion events — so there is no local signal to drive `/trigger` from the doorbell itself. Use the dashboard **Wake** button, or a companion motion sensor as above. (This is a TP-Link product-line limitation, confirmed against the device's own local API.)
 
 **Trade-off:** waking a sleeping camera takes ~5–15s, so event clips start a little late and can miss the first moments at the door. That is inherent to battery cameras, not a bug. For gap-free coverage on a critical entry, a wired/PoE camera in always-on mode is still the better choice.
 
