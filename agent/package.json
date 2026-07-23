@@ -1,0 +1,22 @@
+{
+  "name": "openarmos-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Armos — the OpenArmos agent: threat scoring, natural-language alerts, and talk-to-your-house chat over a local LLM.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test src/*.test.ts"
+  },
+  "dependencies": {
+    "mqtt": "^5.10.1",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.2"
+  }
+}

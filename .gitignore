@@ -1,0 +1,33 @@
+# Node
+node_modules/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+config/frigate.yml
+config/double-take.yml
+config/double-take-secrets.yml
+
+# Runtime state and media
+storage/
+**/media/
+*.db
+*.db-shm
+*.db-wal
+
+# CompreFace bind-volume alternatives
+compreface-data/
+compreface-volumes/
+postgres-data/
+
+# Build and test output
+dist/
+build/
+coverage/
+*.log
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/

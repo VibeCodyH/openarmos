@@ -1,0 +1,276 @@
+name: openarmos
+
+# Services without a profile are the light, default core. The faces and remote
+# profiles are optional and must be enabled explicitly.
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      # ":z" relabels for SELinux (Fedora/RHEL); ignored on non-SELinux Docker.
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro,z
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-logs:/mosquitto/log
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mosquitto_pub",
+          "-h",
+          "localhost",
+          "-t",
+          "openarmos/healthcheck",
+          "-m",
+          "ok",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - openarmos
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    # Enable this reservation after installing the NVIDIA Container Toolkit.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    networks:
+      - openarmos
+
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-America/New_York}
+    ports:
+      - "8123:8123"
+    volumes:
+      - homeassistant-config:/config
+    networks:
+      - openarmos
+
+  frigate:
+    image: ghcr.io/blakeblackshear/frigate:stable
+    container_name: frigate
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    shm_size: "512mb"
+    environment:
+      FRIGATE_RTSP_URL: ${FRIGATE_RTSP_URL:-rtsp://user:password@camera.local:554/stream1}
+    ports:
+      # Frigate's authenticated web UI. Port 5000 stays internal for Double Take.
+      - "8971:8971"
+      - "8554:8554"
+      - "8555:8555/tcp"
+      - "8555:8555/udp"
+    volumes:
+      - frigate-config:/config
+      # Copy config/frigate.yml.example -> config/frigate.yml first. Frigate owns
+      # (migrates/writes) this file, so it must be writable and is gitignored.
+      - ./config/frigate.yml:/config/config.yml:z
+      - frigate-media:/media/frigate
+      - type: tmpfs
+        target: /tmp/cache
+        tmpfs:
+          size: 1000000000
+    # Optional video decode acceleration. Select the device and matching
+    # hwaccel_args from the Frigate documentation before enabling it.
+    # devices:
+    #   - /dev/dri/renderD128:/dev/dri/renderD128
+    networks:
+      - openarmos
+
+  armos:
+    container_name: armos
+    build: ./agent
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    environment:
+      MQTT_URL: ${MQTT_URL:-mqtt://mosquitto:1883}
+      FRIGATE_EVENTS_TOPIC: ${FRIGATE_EVENTS_TOPIC:-frigate/events}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:14b}
+      HA_URL: ${HA_URL:-http://homeassistant:8123}
+      HA_TOKEN: ${HA_TOKEN-}
+      NTFY_URL: ${NTFY_URL-}
+      KNOWN_FACES: ${KNOWN_FACES-}
+      MODE: ${MODE:-home}
+      ARMED_ZONES: ${ARMED_ZONES-}
+      HA_LOCKS: ${HA_LOCKS-}
+      HA_GATE: ${HA_GATE-}
+      FRIGATE_PUBLIC_URL: ${FRIGATE_PUBLIC_URL:-https://localhost:8971}
+      PORT: ${PORT:-8099}
+    ports:
+      - "8099:8099"
+    networks:
+      - openarmos
+
+  # Optional and heavier. This profile adds face recognition and its database.
+  double-take:
+    image: jakowenko/double-take:latest
+    container_name: double-take
+    profiles: ["faces"]
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      frigate:
+        condition: service_started
+      compreface-fe:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    volumes:
+      - double-take-data:/.storage
+      # Copy config/double-take.yml.example -> config/double-take.yml first (writable, gitignored).
+      - ./config/double-take.yml:/.storage/config/config.yml:z
+    networks:
+      - openarmos
+
+  compreface-postgres-db:
+    image: exadel/compreface-postgres-db:${COMPREFACE_VERSION:-1.2.0}
+    container_name: compreface-postgres-db
+    profiles: ["faces"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${COMPREFACE_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${COMPREFACE_DB_PASSWORD:-change-me}
+      POSTGRES_DB: ${COMPREFACE_DB_NAME:-frs}
+    volumes:
+      - compreface-postgres-data:/var/lib/postgresql/data
+    networks:
+      - openarmos
+
+  compreface-admin:
+    image: exadel/compreface-admin:${COMPREFACE_VERSION:-1.2.0}
+    container_name: compreface-admin
+    profiles: ["faces"]
+    restart: unless-stopped
+    depends_on:
+      - compreface-postgres-db
+      - compreface-api
+    environment:
+      POSTGRES_USER: ${COMPREFACE_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${COMPREFACE_DB_PASSWORD:-change-me}
+      POSTGRES_URL: jdbc:postgresql://compreface-postgres-db:5432/${COMPREFACE_DB_NAME:-frs}
+      SPRING_PROFILES_ACTIVE: dev
+      ENABLE_EMAIL_SERVER: "false"
+      ADMIN_JAVA_OPTS: ${COMPREFACE_ADMIN_JAVA_OPTS:--Xmx1g}
+      MAX_FILE_SIZE: 5MB
+      MAX_REQUEST_SIZE: 10M
+    networks:
+      - openarmos
+
+  compreface-api:
+    image: exadel/compreface-api:${COMPREFACE_VERSION:-1.2.0}
+    container_name: compreface-api
+    profiles: ["faces"]
+    restart: unless-stopped
+    depends_on:
+      - compreface-postgres-db
+      - compreface-core
+    environment:
+      POSTGRES_USER: ${COMPREFACE_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${COMPREFACE_DB_PASSWORD:-change-me}
+      POSTGRES_URL: jdbc:postgresql://compreface-postgres-db:5432/${COMPREFACE_DB_NAME:-frs}
+      SPRING_PROFILES_ACTIVE: dev
+      API_JAVA_OPTS: ${COMPREFACE_API_JAVA_OPTS:--Xmx4g}
+      SAVE_IMAGES_TO_DB: ${COMPREFACE_SAVE_IMAGES:-true}
+      MAX_FILE_SIZE: 5MB
+      MAX_REQUEST_SIZE: 10M
+      CONNECTION_TIMEOUT: "10000"
+      READ_TIMEOUT: "60000"
+      PYTHON_URL: http://compreface-core:3000
+    networks:
+      - openarmos
+
+  compreface-fe:
+    image: exadel/compreface-fe:${COMPREFACE_VERSION:-1.2.0}
+    container_name: compreface-fe
+    profiles: ["faces"]
+    restart: unless-stopped
+    depends_on:
+      - compreface-api
+      - compreface-admin
+    environment:
+      CLIENT_MAX_BODY_SIZE: 10M
+      PROXY_READ_TIMEOUT: 60000ms
+      PROXY_CONNECT_TIMEOUT: 10000ms
+    ports:
+      - "8000:80"
+    networks:
+      - openarmos
+
+  compreface-core:
+    image: exadel/compreface-core:${COMPREFACE_VERSION:-1.2.0}
+    container_name: compreface-core
+    profiles: ["faces"]
+    restart: unless-stopped
+    environment:
+      ML_PORT: "3000"
+      IMG_LENGTH_LIMIT: ${COMPREFACE_MAX_DETECT_SIZE:-640}
+      UWSGI_PROCESSES: ${COMPREFACE_UWSGI_PROCESSES:-2}
+      UWSGI_THREADS: ${COMPREFACE_UWSGI_THREADS:-1}
+    networks:
+      - openarmos
+
+  # Optional remote access. Host networking makes the host-published OpenArmos
+  # ports reachable on this Tailscale node without exposing them publicly.
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: tailscale
+    profiles: ["remote"]
+    restart: unless-stopped
+    network_mode: host
+    hostname: ${TS_HOSTNAME:-openarmos}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY-}
+      TS_HOSTNAME: ${TS_HOSTNAME:-openarmos}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+      TS_AUTH_ONCE: "true"
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:---accept-dns=false}
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+
+networks:
+  openarmos:
+    name: openarmos
+    driver: bridge
+
+volumes:
+  mosquitto-data:
+  mosquitto-logs:
+  ollama-data:
+  homeassistant-config:
+  frigate-config:
+  frigate-media:
+  double-take-data:
+  compreface-postgres-data:
+  tailscale-state:

@@ -1,0 +1,105 @@
+# This file is mounted directly by docker-compose.yml. Set FRIGATE_RTSP_URL in
+# .env before starting the stack.
+mqtt:
+  enabled: true
+  host: mosquitto
+  port: 1883
+  topic_prefix: frigate
+
+# Frigate's portable starter detector runs on CPU. For local YOLO inference on
+# NVIDIA, Intel, Coral, Hailo, or other supported hardware, replace this block
+# and add the matching model block from:
+# https://docs.frigate.video/configuration/object_detectors/
+detectors:
+  cpu:
+    type: cpu
+
+# Example ONNX YOLO shape. This is intentionally not active because Frigate
+# does not bundle a YOLO model and the correct model depends on the hardware.
+# Place a compatible model in Frigate's /config/model_cache first.
+#
+# detectors:
+#   onnx:
+#     type: onnx
+# model:
+#   model_type: yolo-generic
+#   width: 320
+#   height: 320
+#   input_tensor: nchw
+#   input_dtype: float
+#   path: /config/model_cache/yolo.onnx
+#   labelmap_path: /labelmap/coco-80.txt
+
+objects:
+  track:
+    - person
+    - car
+
+record:
+  enabled: true
+  # Frigate 0.14+ schema: retention is per review-class, not a single retain
+  # block. Event-based only here (no continuous 24/7); tune days to taste.
+  alerts:
+    retain:
+      days: 14
+  detections:
+    retain:
+      days: 14
+
+snapshots:
+  enabled: true
+  retain:
+    default: 3
+
+# Frigate's bundled go2rtc owns the camera connection and re-serves it locally,
+# so ffmpeg always reads a stable local stream. FRIGATE_RTSP_URL can be any
+# go2rtc source: a plain rtsp://… URL, or a native driver such as
+# tapo://user:pass@ip for Tapo cameras (connects directly and keeps it warm).
+go2rtc:
+  streams:
+    front_door:
+      - "{FRIGATE_RTSP_URL}"
+
+cameras:
+  front_door:
+    enabled: true
+    ffmpeg:
+      inputs:
+        - path: rtsp://127.0.0.1:8554/front_door
+          # Generous probing so ffmpeg waits for a keyframe to learn the stream
+          # size — restreams often omit codec params until the first keyframe,
+          # which trips preset-rtsp-restream's analyzeduration=0.
+          input_args: -avoid_negative_ts make_zero -fflags +genpts+discardcorrupt -rtsp_transport tcp -analyzeduration 10000000 -probesize 10000000 -use_wallclock_as_timestamps 1
+          roles:
+            - detect
+            - record
+    detect:
+      enabled: true
+      # Match the actual stream resolution. CPU detection at this size is slow;
+      # add a lower-res sub-stream or a GPU detector for production.
+      width: 2304
+      height: 1296
+      fps: 5
+    mqtt:
+      # Larger clean crops give Double Take more face detail.
+      enabled: true
+      timestamp: false
+      bounding_box: false
+      crop: true
+      quality: 100
+      height: 500
+    zones:
+      front_gate:
+        # Normalized x,y polygon. Replace it in Frigate's zone editor.
+        coordinates: 0.05,0.95,0.05,0.45,0.45,0.45,0.45,0.95
+        objects:
+          - person
+      driveway:
+        coordinates: 0.40,0.95,0.40,0.35,0.98,0.35,0.98,0.95
+        objects:
+          - person
+          - car
+
+# With the faces profile enabled, Double Take sends a match back to Frigate.
+# Frigate then publishes the person's name in after.sub_label on frigate/events.
+# The armos agent consumes that field without needing a second MQTT subscription.

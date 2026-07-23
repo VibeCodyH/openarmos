@@ -1,0 +1,44 @@
+# Double Take listens for Frigate events and writes recognized names back to
+# Frigate as sub labels.
+mqtt:
+  host: mosquitto
+  port: 1883
+  topics:
+    frigate: frigate/events
+    homeassistant: homeassistant
+    matches: double-take/matches
+    cameras: double-take/cameras
+
+frigate:
+  url: http://frigate:5000
+  update_sub_labels: true
+  stop_on_match: true
+  labels:
+    - person
+  attempts:
+    latest: 10
+    snapshot: 10
+    mqtt: true
+    delay: 0
+  image:
+    height: 500
+
+detectors:
+  compreface:
+    # CompreFace's frontend is the internal API gateway.
+    url: http://compreface-fe
+    # Start the faces profile, create a Face Recognition service at :8000,
+    # then replace this value with its API key.
+    key: replace-with-compreface-recognition-api-key
+    timeout: 15
+    det_prob_threshold: 0.8
+    opencv_face_required: false
+
+detect:
+  match:
+    save: true
+    confidence: 60
+    min_area: 10000
+  unknown:
+    save: true
+    confidence: 40
