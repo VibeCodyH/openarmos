@@ -8,6 +8,7 @@ import { summarize, maybePush, templateSummary } from "./notify.ts";
 import { lockdown } from "./ha.ts";
 import { startServer } from "./chat.ts";
 import { createBatteryController, type BatteryController } from "./battery.ts";
+import { createAlarmPoller, haPanelReader, panelOwnsMode } from "./alarm.ts";
 import * as store from "./store.ts";
 import type { DetectionEvent, EventRecord, ThreatAssessment } from "./types.ts";
 
@@ -91,6 +92,24 @@ if (config.batteryMode) {
     `[battery] managing [${config.batteryCameras.join(", ") || "(none — set BATTERY_CAMERAS)"}]` +
       `, wake window ${config.batteryActiveSeconds}s`,
   );
+}
+
+// Track the real panel, if there is one. Until now `mode` was only ever what
+// MODE said at boot, so arming at the keypad left the scorer none the wiser.
+if (config.haAlarmEntity) {
+  if (!panelOwnsMode(config.haAlarmEntity, config.haToken)) {
+    console.warn("[alarm] HA_ALARM_ENTITY set but HA_TOKEN is empty — panel tracking disabled, mode stays manual");
+  } else {
+    const poller = createAlarmPoller({
+      read: haPanelReader(config.haUrl, config.haToken, config.haAlarmEntity),
+      apply: (mode) => {
+        state.mode = mode;
+      },
+      intervalMs: config.alarmPollSeconds * 1000,
+    });
+    void poller.tick(); // seed now rather than after a full interval
+    console.log(`[alarm] tracking ${config.haAlarmEntity} every ${config.alarmPollSeconds}s (panel owns mode)`);
+  }
 }
 
 startServer(battery);

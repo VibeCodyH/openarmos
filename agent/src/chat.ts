@@ -6,6 +6,7 @@ import { config, state } from "./config.ts";
 import { generate } from "./ollama.ts";
 import * as store from "./store.ts";
 import type { BatteryController } from "./battery.ts";
+import { panelOwnsMode } from "./alarm.ts";
 
 const json = (res: http.ServerResponse, code: number, body: unknown): void => {
   res.writeHead(code, { "content-type": "application/json" });
@@ -60,6 +61,7 @@ export function startServer(battery: BatteryController | null = null): http.Serv
     if (path === "/api/state") {
       return json(res, 200, {
         ...state,
+        modeSource: panelOwnsMode(config.haAlarmEntity, config.haToken) ? "panel" : "manual",
         frigatePublicUrl: config.frigatePublicUrl,
         battery: battery ? { mode: true, cameras: battery.status() } : { mode: false },
       });
@@ -88,6 +90,14 @@ export function startServer(battery: BatteryController | null = null): http.Serv
     }
 
     if (path === "/mode" && req.method === "POST") {
+      // When a real panel is driving mode, a manual set would be silently
+      // reverted on the next poll — refuse it loudly instead of pretending.
+      if (panelOwnsMode(config.haAlarmEntity, config.haToken)) {
+        return json(res, 409, {
+          error: `mode is driven by ${config.haAlarmEntity}; arm or disarm at the panel`,
+          mode: state.mode,
+        });
+      }
       const mode = parseJson(await readBody(req)).mode;
       if (mode === "home" || mode === "away" || mode === "night") {
         state.mode = mode;
@@ -131,6 +141,8 @@ h1{font-size:17px;margin:0;letter-spacing:.3px}
 .chips button,.mute,select{background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:7px;padding:6px 12px;cursor:pointer;font:inherit}
 .chips button{margin-right:6px;text-transform:capitalize}
 .chips button.on{background:#1f6feb;border-color:#388bfd}
+.chips button:disabled{cursor:default;opacity:.75}
+.chips .src{margin-left:4px;font-size:12px;color:#8b949e}
 .mute.muted{background:#5a1e1e;border-color:#b62324}
 .batt{font-size:12px;padding:5px 10px;border-radius:20px;background:#21262d;border:1px solid #30363d}
 .batt.on{background:#1a4d2e;border-color:#238636}
@@ -179,8 +191,9 @@ function setMode(m){fetch("/mode",{method:"POST",headers:{"content-type":"applic
 function toggleMute(){var muted=!document.getElementById("muteBtn").classList.contains("muted");fetch("/mute",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({muted:muted})}).then(loadState)}
 function loadState(){return fetch("/api/state").then(function(r){return r.json()}).then(function(s){
   FRIG=s.frigatePublicUrl||"";
-  document.getElementById("modeChips").innerHTML=MODES.map(function(m){return '<button data-mode="'+m+'" class="'+(s.mode===m?"on":"")+'">'+m+'</button>'}).join("");
-  document.querySelectorAll("[data-mode]").forEach(function(b){b.onclick=function(){setMode(b.dataset.mode)}});
+  var panel=s.modeSource==="panel";
+  document.getElementById("modeChips").innerHTML=MODES.map(function(m){return '<button data-mode="'+m+'" class="'+(s.mode===m?"on":"")+'"'+(panel?' disabled title="set by the alarm panel"':"")+'>'+m+'</button>'}).join("")+(panel?'<span class="src">🔒 panel</span>':"");
+  if(!panel)document.querySelectorAll("[data-mode]").forEach(function(b){b.onclick=function(){setMode(b.dataset.mode)}});
   var mb=document.getElementById("muteBtn");mb.textContent=s.muted?"🔕 Muted":"🔔 Alerts on";mb.className="mute"+(s.muted?" muted":"");
   var bb=document.getElementById("batteryBox");
   if(s.battery&&s.battery.mode){var cams=s.battery.cameras||[];

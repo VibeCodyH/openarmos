@@ -84,10 +84,35 @@ Its responsibilities are:
 - produce concise natural-language notifications
 - serve a dashboard: an activity feed with snapshot thumbnails and one-click links to each Frigate clip, a home/away/night switch, a notification mute toggle, a threat-level filter, and a chat box for talking to the house
 - run home, away, and night behavior through `MODE`; away is the guardian posture
+- follow the real alarm panel, when you have one (see below)
 - trigger configured Home Assistant locks and gate entities during lockdown
 - manage battery-camera power in battery mode (see below)
 
 The service listens on port 8099 and exposes the dashboard, `/chat`, `/trigger`, and `/healthz`. Clip and snapshot links point at `FRIGATE_PUBLIC_URL` (the browser-reachable Frigate address); when Frigate authentication is on, be signed in to Frigate in the same browser for the links to load. Muting suppresses pushes but still records events to the feed. If `NTFY_URL` is blank, notifications are logged only.
+
+## Following a real alarm panel
+
+Mode is the heaviest input in the scorer — `away` multiplies every sighting by 1.5, and armed zones add a flat 25. By default mode comes from `MODE` at startup and the dashboard buttons, which means arming the house at the keypad leaves the agent thinking it's still `home`: the scoring goes soft exactly when the house is armed.
+
+Set `HA_ALARM_ENTITY` to an `alarm_control_panel` entity and the panel drives mode instead:
+
+```bash
+HA_ALARM_ENTITY=alarm_control_panel.elk_m1
+ALARM_POLL_SECONDS=15
+```
+
+This works with any panel Home Assistant exposes that way — ELK M1, DSC, Honeywell, Qolsys, Konnected, and the rest — because it reads the entity, not the panel. The mapping:
+
+| Panel state | Mode | |
+|---|---|---|
+| `disarmed` | `home` | |
+| `armed_home`, `armed_night` | `night` | armed while occupied |
+| `armed_away`, `armed_vacation`, `armed_custom_bypass` | `away` | bypass takes the higher posture |
+| `triggered` | `away` | |
+| `arming`, `pending`, `disarming` | *hold* | never lock down mid-exit or during entry delay |
+| `unavailable`, `unknown` | *hold* | a panel that drops offline must not relax the scoring |
+
+Holding is the safety property: an unreachable panel keeps the last known mode rather than falling back to `home`. While the panel owns mode, the dashboard's mode buttons go read-only and `POST /mode` returns 409 — two sources of truth for "is the house armed" is worse than one. Leave `HA_ALARM_ENTITY` blank (the default) to keep mode manual.
 
 ## Battery cameras (renters, no PoE)
 

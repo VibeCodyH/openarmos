@@ -37,6 +37,11 @@ export const config = {
   ntfyUrl: process.env.NTFY_URL ?? "",
   haLocks: list(process.env.HA_LOCKS),
   haGate: process.env.HA_GATE ?? "",
+  // Optional alarm_control_panel entity (e.g. alarm_control_panel.elk_m1). When
+  // set, the real panel owns `mode` and the dashboard/chat can't override it —
+  // two sources of truth for "is the house armed" is worse than one.
+  haAlarmEntity: process.env.HA_ALARM_ENTITY ?? "",
+  alarmPollSeconds: posNum(process.env.ALARM_POLL_SECONDS, 15),
   // Browser-reachable Frigate base URL for clip/snapshot links on the dashboard.
   // The agent talks to Frigate over the internal network; the browser can't, so
   // this is the host-published (or Tailscale) address, not the compose hostname.
