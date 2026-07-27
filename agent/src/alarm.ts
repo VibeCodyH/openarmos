@@ -22,18 +22,27 @@ export function haStateToMode(haState: string): Mode | null {
 
     // Armed while occupied — the perimeter is live but people are inside.
     // Sits between "home" and "away", which is exactly what `night` (×1.25) is.
+    //
+    // custom_bypass belongs here rather than with `away`: bypassing zones is
+    // what you do when you're staying in and want to move around. It raises the
+    // posture without reaching score.ts's lockdown gate, which is `away`-only —
+    // auto-locking the house around someone who just armed it from inside is
+    // not a decision this mapping should make on their behalf.
     case "armed_home":
     case "armed_night":
+    case "armed_custom_bypass":
       return "night";
 
-    // Nobody home, or armed with zones bypassed. Bypass is ambiguous by design,
-    // so it takes the higher multiplier: over-caring is the cheap failure here.
+    // Nobody home.
     case "armed_away":
     case "armed_vacation":
-    case "armed_custom_bypass":
       return "away";
 
-    // The alarm is going off. Nothing about that is a `home` situation.
+    // The alarm is going off. Nothing about that is a `home` situation. Note
+    // this reaches the lockdown gate: with HA_LOCKS set, a triggered panel plus
+    // an unknown person at critical will lock up. That's the intended response
+    // to a burglar alarm, and most panels report a fire alarm as the same bare
+    // `triggered` — locks thumb-turn from inside, but it is worth knowing.
     case "triggered":
       return "away";
 

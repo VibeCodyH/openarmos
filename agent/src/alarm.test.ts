@@ -11,10 +11,16 @@ test("occupied-armed states land on night", () => {
   assert.equal(haStateToMode("armed_night"), "night");
 });
 
-test("unoccupied and bypassed states land on away", () => {
+test("custom_bypass stays out of away — it must not reach the lockdown gate", () => {
+  // Bypassing zones is what you do when you're staying in. score.ts only locks
+  // down in `away`, so this mapping is what keeps auto-lockdown away from
+  // someone who armed the panel from inside.
+  assert.equal(haStateToMode("armed_custom_bypass"), "night");
+});
+
+test("unoccupied states land on away", () => {
   assert.equal(haStateToMode("armed_away"), "away");
   assert.equal(haStateToMode("armed_vacation"), "away");
-  assert.equal(haStateToMode("armed_custom_bypass"), "away");
 });
 
 test("triggered is away, never home", () => {

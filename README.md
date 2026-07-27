@@ -106,13 +106,17 @@ This works with any panel Home Assistant exposes that way — ELK M1, DSC, Honey
 | Panel state | Mode | |
 |---|---|---|
 | `disarmed` | `home` | |
-| `armed_home`, `armed_night` | `night` | armed while occupied |
-| `armed_away`, `armed_vacation`, `armed_custom_bypass` | `away` | bypass takes the higher posture |
-| `triggered` | `away` | |
+| `armed_home`, `armed_night`, `armed_custom_bypass` | `night` | armed while occupied |
+| `armed_away`, `armed_vacation` | `away` | |
+| `triggered` | `away` | see the lockdown note below |
 | `arming`, `pending`, `disarming` | *hold* | never lock down mid-exit or during entry delay |
 | `unavailable`, `unknown` | *hold* | a panel that drops offline must not relax the scoring |
 
-Holding is the safety property: an unreachable panel keeps the last known mode rather than falling back to `home`. While the panel owns mode, the dashboard's mode buttons go read-only and `POST /mode` returns 409 — two sources of truth for "is the house armed" is worse than one. Leave `HA_ALARM_ENTITY` blank (the default) to keep mode manual.
+Holding is the safety property: an unreachable panel keeps the last known mode rather than falling back to `home`.
+
+**Where this touches lockdown.** Armos only locks the house (`HA_LOCKS`, `HA_GATE`) in `away` mode, so the occupied-armed states above deliberately map to `night` instead — including `armed_custom_bypass`, since bypassing zones is what you do when you're staying in. The one state that does reach lockdown automatically is `triggered`: a firing panel plus an unknown person at critical will lock up. That's the intended answer to a burglar alarm, and worth knowing because most panels report a fire alarm as the same bare `triggered`. Locks thumb-turn from the inside. Leave `HA_LOCKS` unset if you'd rather Armos never actuate.
+
+While the panel owns mode, the dashboard's mode buttons go read-only and `POST /mode` returns 409 — two sources of truth for "is the house armed" is worse than one. Leave `HA_ALARM_ENTITY` blank (the default) to keep mode manual.
 
 ## Battery cameras (renters, no PoE)
 
